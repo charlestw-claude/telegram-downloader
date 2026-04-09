@@ -1,0 +1,7 @@
+telethon>=1.36.0
+cryptg>=0.4
+aiosqlite>=0.20.0
+click>=8.1.0
+rich>=13.0.0
+python-dotenv>=1.0.0
+aiofiles>=24.1.0
