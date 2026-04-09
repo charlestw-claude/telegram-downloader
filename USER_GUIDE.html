@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Telegram Downloader 使用指南</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 2rem;
+            line-height: 1.7;
+            color: #333;
+            background: #fafafa;
+        }
+        h1 { border-bottom: 3px solid #2c5282; padding-bottom: 0.5rem; color: #1a365d; }
+        h2 { color: #2c5282; margin-top: 2.5rem; border-bottom: 1px solid #e2e8f0; padding-bottom: 0.3rem; }
+        h3 { color: #4a5568; }
+        a { color: #2b6cb0; text-decoration: none; }
+        a:hover { text-decoration: underline; }
+        code {
+            background: #edf2f7;
+            padding: 0.15rem 0.4rem;
+            border-radius: 3px;
+            font-size: 0.9em;
+            font-family: 'Consolas', 'Monaco', monospace;
+        }
+        pre {
+            background: #2d3748;
+            color: #e2e8f0;
+            padding: 1rem 1.2rem;
+            border-radius: 6px;
+            overflow-x: auto;
+            line-height: 1.5;
+        }
+        pre code { background: none; color: inherit; padding: 0; }
+        table {
+            border-collapse: collapse;
+            width: 100%;
+            margin: 1rem 0;
+        }
+        th, td {
+            border: 1px solid #e2e8f0;
+            padding: 0.6rem 0.8rem;
+            text-align: left;
+        }
+        th { background: #edf2f7; font-weight: 600; }
+        .version-info {
+            color: #718096;
+            font-size: 0.9em;
+            margin-bottom: 2rem;
+        }
+        .toc {
+            background: #fff;
+            border: 1px solid #e2e8f0;
+            border-radius: 6px;
+            padding: 1.2rem 1.5rem;
+            margin-bottom: 2rem;
+        }
+        .toc ol { margin: 0; padding-left: 1.5rem; }
+        .toc li { margin: 0.3rem 0; }
+        .faq h3 { color: #2c5282; }
+    </style>
+</head>
+<body>
+
+<h1>Telegram Downloader 使用指南</h1>
+<p class="version-info">版本：0.1.0 | 最後更新：2026-04-10</p>
+
+<nav class="toc">
+    <strong>目錄</strong>
+    <ol>
+        <li><a href="#intro">簡介</a></li>
+        <li><a href="#quickstart">快速開始</a></li>
+        <li><a href="#features">功能說明</a></li>
+        <li><a href="#config">設定說明</a></li>
+        <li><a href="#faq">常見問題</a></li>
+        <li><a href="#troubleshooting">疑難排解</a></li>
+    </ol>
+</nav>
+
+<h2 id="intro">簡介</h2>
+<p>Telegram Downloader 是一個命令列工具，用於自動下載、訂閱及管理 Telegram 頻道和對話中的影片與圖片。</p>
+<h3>主要功能</h3>
+<ul>
+    <li><strong>一鍵下載</strong>：從指定頻道或對話下載所有影片和圖片</li>
+    <li><strong>訂閱監控</strong>：訂閱頻道，自動偵測並下載新內容</li>
+    <li><strong>智慧管理</strong>：自動去重、並發下載、失敗重試</li>
+    <li><strong>分類儲存</strong>：依發送者 ID 分資料夾，影片與圖片分開存放</li>
+</ul>
+
+<h2 id="quickstart">快速開始</h2>
+
+<h3>第一步：取得 Telegram API 憑證</h3>
+<ol>
+    <li>前往 <a href="https://my.telegram.org/apps">my.telegram.org/apps</a></li>
+    <li>登入你的 Telegram 帳號</li>
+    <li>建立一個 Application</li>
+    <li>記下 <code>api_id</code> 和 <code>api_hash</code></li>
+</ol>
+
+<h3>第二步：安裝</h3>
+<pre><code>git clone https://github.com/charlestw-claude/telegram-downloader.git
+cd telegram-downloader
+pip install -e .</code></pre>
+
+<h3>第三步：設定</h3>
+<pre><code>cp .env.example .env</code></pre>
+<p>編輯 <code>.env</code> 檔案，填入你的 API 憑證：</p>
+<pre><code>TELEGRAM_API_ID=你的api_id
+TELEGRAM_API_HASH=你的api_hash
+TELEGRAM_PHONE=+886912345678  # 可選</code></pre>
+
+<h3>第四步：首次使用</h3>
+<pre><code>telegram-dl download @channel_name</code></pre>
+<p>首次執行會要求你輸入手機號碼和驗證碼，完成後會建立 session 檔案，之後不需要重新登入。</p>
+
+<h2 id="features">功能說明</h2>
+
+<h3>下載媒體 (<code>download</code>)</h3>
+<pre><code># 基本用法（下載影片+圖片）
+telegram-dl download @channel_name
+
+# 使用 chat ID
+telegram-dl download -1001234567890
+
+# 限制掃描訊息數量
+telegram-dl download @channel_name --limit 100
+
+# 只下載影片
+telegram-dl download @channel_name --no-images
+
+# 只下載圖片
+telegram-dl download @channel_name --no-videos</code></pre>
+
+<h3>訂閱頻道 (<code>subscribe</code>)</h3>
+<pre><code># 訂閱頻道
+telegram-dl subscribe @channel_name
+
+# 只訂閱影片
+telegram-dl subscribe @channel_name --no-images</code></pre>
+
+<h3>取消訂閱 (<code>unsubscribe</code>)</h3>
+<pre><code>telegram-dl unsubscribe @channel_name</code></pre>
+
+<h3>查看訂閱清單 (<code>list</code>)</h3>
+<pre><code>telegram-dl list</code></pre>
+
+<h3>啟動自動下載 (<code>run</code>)</h3>
+<p>啟動排程器，定期檢查訂閱的頻道並自動下載新內容。</p>
+<pre><code>telegram-dl run</code></pre>
+<p>按 <code>Ctrl+C</code> 停止。</p>
+
+<h3>查看狀態 (<code>status</code>)</h3>
+<pre><code>telegram-dl status</code></pre>
+
+<h3>查看設定 (<code>config</code>)</h3>
+<pre><code>telegram-dl config</code></pre>
+
+<h2 id="config">設定說明</h2>
+<p>所有設定透過 <code>.env</code> 檔案管理：</p>
+<table>
+    <thead>
+        <tr><th>設定項</th><th>預設值</th><th>說明</th></tr>
+    </thead>
+    <tbody>
+        <tr><td><code>TELEGRAM_API_ID</code></td><td>（必填）</td><td>Telegram API ID</td></tr>
+        <tr><td><code>TELEGRAM_API_HASH</code></td><td>（必填）</td><td>Telegram API Hash</td></tr>
+        <tr><td><code>TELEGRAM_PHONE</code></td><td>（可選）</td><td>手機號碼，用於自動登入</td></tr>
+        <tr><td><code>DOWNLOAD_PATH</code></td><td><code>./downloads</code></td><td>下載檔案儲存路徑</td></tr>
+        <tr><td><code>DB_PATH</code></td><td><code>./telegram_downloader.db</code></td><td>資料庫檔案路徑</td></tr>
+        <tr><td><code>MAX_CONCURRENT_DOWNLOADS</code></td><td><code>3</code></td><td>最大並發下載數</td></tr>
+        <tr><td><code>LOG_LEVEL</code></td><td><code>INFO</code></td><td>日誌等級</td></tr>
+        <tr><td><code>LOG_DIR</code></td><td><code>./logs</code></td><td>日誌檔案目錄</td></tr>
+    </tbody>
+</table>
+
+<h3>下載目錄結構</h3>
+<pre><code>downloads/
+├── 123456789/          # 發送者 ID
+│   ├── videos/         # 影片
+│   └── images/         # 圖片
+├── 987654321/
+│   ├── videos/
+│   └── images/
+└── unknown/            # 無法識別發送者
+    ├── videos/
+    └── images/</code></pre>
+
+<div class="faq">
+<h2 id="faq">常見問題</h2>
+
+<h3>Q: 需要 Telegram Premium 嗎？</h3>
+<p>不需要。此工具使用 Telegram User API，只需要一般的 Telegram 帳號。</p>
+
+<h3>Q: 可以下載私人頻道的內容嗎？</h3>
+<p>可以，只要你的帳號已加入該私人頻道。</p>
+
+<h3>Q: 下載會佔用多少空間？</h3>
+<p>取決於頻道的媒體數量和品質。影片檔案通常較大，建議確保有足夠的磁碟空間。</p>
+
+<h3>Q: 支援哪些媒體格式？</h3>
+<ul>
+    <li><strong>影片</strong>：MP4、MOV、MKV、WebM、AVI</li>
+    <li><strong>圖片</strong>：JPG、PNG、WebP</li>
+    <li><strong>動畫</strong>：GIF</li>
+</ul>
+
+<h3>Q: 重複的檔案會怎麼處理？</h3>
+<p>工具會自動檢查資料庫記錄和檔案大小，跳過已下載的內容。</p>
+</div>
+
+<h2 id="troubleshooting">疑難排解</h2>
+
+<h3>登入失敗</h3>
+<ul>
+    <li>確認 <code>TELEGRAM_API_ID</code> 和 <code>TELEGRAM_API_HASH</code> 正確</li>
+    <li>確認手機號碼格式正確（含國碼，如 <code>+886</code>）</li>
+    <li>刪除 <code>.session</code> 檔案後重試</li>
+</ul>
+
+<h3>下載速度慢</h3>
+<ul>
+    <li>Telegram API 有速率限制，這是正常的</li>
+    <li>降低 <code>MAX_CONCURRENT_DOWNLOADS</code> 可減少被限速的機會</li>
+</ul>
+
+<h3>找不到頻道</h3>
+<ul>
+    <li>確認你的帳號已加入該頻道</li>
+    <li>使用 <code>@username</code> 格式而非頻道名稱</li>
+    <li>私人頻道需使用 chat ID（數字格式）</li>
+</ul>
+
+<h3>資料庫錯誤</h3>
+<ul>
+    <li>刪除 <code>.db</code> 檔案重新開始（會失去下載歷史記錄）</li>
+    <li>確認磁碟空間充足</li>
+</ul>
+
+</body>
+</html>
