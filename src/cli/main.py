@@ -11,14 +11,14 @@ from rich.table import Table
 
 from src.core.config import Config
 from src.core.logger import setup_logger
-from src.core.types import MediaType
+from src.core.types import DownloadStatus, MediaType, SubscriptionStatus
 
 console = Console()
 
 
 def run_async(coro):
-    """Run an async function in a new event loop."""
-    return asyncio.get_event_loop().run_until_complete(coro)
+    """Run an async function."""
+    return asyncio.run(coro)
 
 
 async def _get_app(config: Config):
@@ -58,6 +58,19 @@ async def _get_app(config: Config):
         "subscription": subscription,
         "scheduler": scheduler,
     }
+
+
+async def _start_client(client, config: Config) -> None:
+    """Start the Telegram client with phone callback fallback."""
+    if config.phone:
+        await client.start(phone=config.phone)
+    else:
+        await client.start(phone=lambda: click.prompt("Enter phone number"))
+
+
+def _parse_chat_id(chat_id: str) -> int | str:
+    """Parse chat_id string to int (if numeric) or keep as username string."""
+    return int(chat_id) if chat_id.lstrip("-").isdigit() else chat_id
 
 
 @click.group()
@@ -104,11 +117,10 @@ def download(ctx, chat_id, limit, videos, images):
         client = app["client"]
 
         try:
-            await client.start(phone=config.phone)
-            console.print(f"[green]Connected to Telegram[/green]")
+            await _start_client(client, config)
+            console.print("[green]Connected to Telegram[/green]")
 
-            # Parse chat_id
-            target = int(chat_id) if chat_id.lstrip("-").isdigit() else chat_id
+            target = _parse_chat_id(chat_id)
 
             # Resolve media
             console.print(f"Scanning [cyan]{chat_id}[/cyan] for media...")
@@ -139,8 +151,8 @@ def download(ctx, chat_id, limit, videos, images):
 
             if task_ids:
                 results = await queue.process_queue()
-                completed = sum(1 for r in results if r.status.value == "completed")
-                failed = sum(1 for r in results if r.status.value == "failed")
+                completed = sum(1 for r in results if r.status == DownloadStatus.COMPLETED)
+                failed = sum(1 for r in results if r.status == DownloadStatus.FAILED)
                 console.print(
                     f"\nDone: [green]{completed} completed[/green], "
                     f"[red]{failed} failed[/red]"
@@ -175,10 +187,10 @@ def subscribe(ctx, chat_id, videos, images):
         client = app["client"]
 
         try:
-            await client.start(phone=config.phone)
+            await _start_client(client, config)
             sub_mgr = app["subscription"]
 
-            target = int(chat_id) if chat_id.lstrip("-").isdigit() else chat_id
+            target = _parse_chat_id(chat_id)
             sub = await sub_mgr.add(target, media_types=media_types)
             console.print(
                 f"[green]Subscribed to {sub.chat_title}[/green] "
@@ -205,10 +217,10 @@ def unsubscribe(ctx, chat_id):
         client = app["client"]
 
         try:
-            await client.start(phone=config.phone)
+            await _start_client(client, config)
             sub_mgr = app["subscription"]
 
-            target = int(chat_id) if chat_id.lstrip("-").isdigit() else chat_id
+            target = _parse_chat_id(chat_id)
             removed = await sub_mgr.remove(target)
             if removed:
                 console.print(f"[green]Unsubscribed from {chat_id}[/green]")
@@ -276,8 +288,6 @@ def status(ctx):
     config = ctx.obj["config"]
 
     async def _run():
-        from src.core.types import DownloadStatus
-
         app = await _get_app(config)
 
         try:
@@ -287,7 +297,7 @@ def status(ctx):
             failed = await db.get_download_count(status=DownloadStatus.FAILED)
 
             subs = await db.get_all_subscriptions()
-            active_subs = sum(1 for s in subs if s.status.value == "active")
+            active_subs = sum(1 for s in subs if s.status == SubscriptionStatus.ACTIVE)
 
             table = Table(title="Status")
             table.add_column("Metric", style="cyan")
@@ -322,7 +332,7 @@ def run(ctx):
         client = app["client"]
 
         try:
-            await client.start(phone=config.phone)
+            await _start_client(client, config)
             console.print("[green]Connected to Telegram[/green]")
 
             scheduler = app["scheduler"]
@@ -339,7 +349,9 @@ def run(ctx):
             while scheduler.is_running:
                 results = await queue.process_queue()
                 if results:
-                    completed = sum(1 for r in results if r.status.value == "completed")
+                    completed = sum(
+                        1 for r in results if r.status == DownloadStatus.COMPLETED
+                    )
                     console.print(f"Processed {len(results)} items ({completed} completed)")
                 await asyncio.sleep(5)
 
