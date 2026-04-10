@@ -97,8 +97,10 @@ def cli(ctx, env):
 @click.option("--limit", "-l", default=None, type=int, help="Max messages to scan")
 @click.option("--videos/--no-videos", default=True, help="Download videos")
 @click.option("--images/--no-images", default=True, help="Download images")
+@click.option("--min-size", default=None, type=int, help="Min file size in bytes")
+@click.option("--max-size", default=None, type=int, help="Max file size in bytes")
 @click.pass_context
-def download(ctx, chat_id, limit, videos, images):
+def download(ctx, chat_id, limit, videos, images, min_size, max_size):
     """Download media from a chat or channel.
 
     CHAT_ID can be a numeric ID or @username.
@@ -129,6 +131,8 @@ def download(ctx, chat_id, limit, videos, images):
                 chat_id=target,
                 media_types=media_types,
                 limit=limit,
+                min_file_size=min_size,
+                max_file_size=max_size,
             )
 
             if not items:
@@ -168,8 +172,10 @@ def download(ctx, chat_id, limit, videos, images):
 @click.argument("chat_id")
 @click.option("--videos/--no-videos", default=True, help="Download videos")
 @click.option("--images/--no-images", default=True, help="Download images")
+@click.option("--min-size", default=None, type=int, help="Min file size in bytes")
+@click.option("--max-size", default=None, type=int, help="Max file size in bytes")
 @click.pass_context
-def subscribe(ctx, chat_id, videos, images):
+def subscribe(ctx, chat_id, videos, images, min_size, max_size):
     """Subscribe to a channel or chat for auto-download.
 
     CHAT_ID can be a numeric ID or @username.
@@ -191,7 +197,12 @@ def subscribe(ctx, chat_id, videos, images):
             sub_mgr = app["subscription"]
 
             target = _parse_chat_id(chat_id)
-            sub = await sub_mgr.add(target, media_types=media_types)
+            sub = await sub_mgr.add(
+                target,
+                media_types=media_types,
+                min_file_size=min_size,
+                max_file_size=max_size,
+            )
             console.print(
                 f"[green]Subscribed to {sub.chat_title}[/green] "
                 f"(id={sub.chat_id}, types={[mt.value for mt in sub.media_types]})"
@@ -229,6 +240,88 @@ def unsubscribe(ctx, chat_id):
         finally:
             await app["db"].close()
             await client.disconnect()
+
+    run_async(_run())
+
+
+@cli.command()
+@click.argument("chat_id")
+@click.pass_context
+def pause(ctx, chat_id):
+    """Pause a subscription (stop checking for new media)."""
+    config = ctx.obj["config"]
+
+    async def _run():
+        app = await _get_app(config)
+
+        try:
+            target = _parse_chat_id(chat_id)
+            numeric_id = target if isinstance(target, int) else None
+
+            if numeric_id is None:
+                client = app["client"]
+                await _start_client(client, config)
+                from src.resolver.resolver import MediaResolver
+                resolver = MediaResolver(client)
+                info = await resolver.get_chat_info(target)
+                if not info:
+                    console.print(f"[red]Chat not found: {chat_id}[/red]")
+                    return
+                numeric_id = info["id"]
+
+            sub_mgr = app["subscription"]
+            sub = await sub_mgr.get(numeric_id)
+            if not sub:
+                console.print(f"[yellow]Not subscribed to {chat_id}[/yellow]")
+                return
+
+            await sub_mgr.pause(numeric_id)
+            console.print(f"[yellow]Paused subscription: {sub.chat_title or chat_id}[/yellow]")
+        finally:
+            await app["db"].close()
+            if app.get("client") and app["client"].is_connected():
+                await app["client"].disconnect()
+
+    run_async(_run())
+
+
+@cli.command()
+@click.argument("chat_id")
+@click.pass_context
+def resume(ctx, chat_id):
+    """Resume a paused subscription."""
+    config = ctx.obj["config"]
+
+    async def _run():
+        app = await _get_app(config)
+
+        try:
+            target = _parse_chat_id(chat_id)
+            numeric_id = target if isinstance(target, int) else None
+
+            if numeric_id is None:
+                client = app["client"]
+                await _start_client(client, config)
+                from src.resolver.resolver import MediaResolver
+                resolver = MediaResolver(client)
+                info = await resolver.get_chat_info(target)
+                if not info:
+                    console.print(f"[red]Chat not found: {chat_id}[/red]")
+                    return
+                numeric_id = info["id"]
+
+            sub_mgr = app["subscription"]
+            sub = await sub_mgr.get(numeric_id)
+            if not sub:
+                console.print(f"[yellow]Not subscribed to {chat_id}[/yellow]")
+                return
+
+            await sub_mgr.resume(numeric_id)
+            console.print(f"[green]Resumed subscription: {sub.chat_title or chat_id}[/green]")
+        finally:
+            await app["db"].close()
+            if app.get("client") and app["client"].is_connected():
+                await app["client"].disconnect()
 
     run_async(_run())
 
