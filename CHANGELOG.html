@@ -25,6 +25,33 @@
 <body>
     <h1>Changelog</h1>
 
+    <h2 id="0.2.0"><a href="#0.2.0">[0.2.0]</a> - 2026-04-10</h2>
+    <h3>Added</h3>
+    <ul>
+        <li>CLI <code>pause</code> command to pause subscription monitoring</li>
+        <li>CLI <code>resume</code> command to resume paused subscriptions</li>
+        <li>CLI <code>history</code> command with download record viewing, filtering, and export (CSV/JSON)</li>
+        <li><code>--min-size</code> / <code>--max-size</code> options for download and subscribe commands</li>
+        <li>Rich progress bars with download speed and file size display</li>
+        <li>Scan timeout (default 300s) for resolver to prevent hangs on large channels</li>
+        <li>Auto-recovery for errored subscriptions in scheduler</li>
+        <li>Unit tests for core types, config, database, and downloader modules</li>
+    </ul>
+    <h3>Fixed</h3>
+    <ul>
+        <li>Replace deprecated <code>asyncio.get_event_loop()</code> with <code>asyncio.run()</code></li>
+        <li>Fix variable shadowing in downloader progress callback</li>
+        <li>Add phone number prompt fallback when TELEGRAM_PHONE is not set</li>
+        <li>Use enum comparisons instead of fragile string comparisons</li>
+        <li>Use full UUID for task IDs instead of truncated 8-char version</li>
+        <li>Fix semaphore private attribute access in queue active count</li>
+        <li>Fix possibly-undefined variable in download retry loop</li>
+    </ul>
+    <h3>Changed</h3>
+    <ul>
+        <li>Remove unused <code>aiofiles</code> dependency</li>
+    </ul>
+
     <h2 id="0.1.0"><a href="#0.1.0">[0.1.0]</a> - 2026-04-10</h2>
     <h3>Added</h3>
     <ul>

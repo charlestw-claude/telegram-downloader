@@ -5,20 +5,25 @@ from __future__ import annotations
 import asyncio
 import sys
 
+import csv
+import io
+import json
+
 import click
 from rich.console import Console
+from rich.progress import BarColumn, DownloadColumn, Progress, TextColumn, TransferSpeedColumn
 from rich.table import Table
 
 from src.core.config import Config
 from src.core.logger import setup_logger
-from src.core.types import MediaType
+from src.core.types import DownloadStatus, MediaType, SubscriptionStatus
 
 console = Console()
 
 
 def run_async(coro):
-    """Run an async function in a new event loop."""
-    return asyncio.get_event_loop().run_until_complete(coro)
+    """Run an async function."""
+    return asyncio.run(coro)
 
 
 async def _get_app(config: Config):
@@ -60,6 +65,19 @@ async def _get_app(config: Config):
     }
 
 
+async def _start_client(client, config: Config) -> None:
+    """Start the Telegram client with phone callback fallback."""
+    if config.phone:
+        await client.start(phone=config.phone)
+    else:
+        await client.start(phone=lambda: click.prompt("Enter phone number"))
+
+
+def _parse_chat_id(chat_id: str) -> int | str:
+    """Parse chat_id string to int (if numeric) or keep as username string."""
+    return int(chat_id) if chat_id.lstrip("-").isdigit() else chat_id
+
+
 @click.group()
 @click.option("--env", default=None, help="Path to .env file")
 @click.pass_context
@@ -84,8 +102,10 @@ def cli(ctx, env):
 @click.option("--limit", "-l", default=None, type=int, help="Max messages to scan")
 @click.option("--videos/--no-videos", default=True, help="Download videos")
 @click.option("--images/--no-images", default=True, help="Download images")
+@click.option("--min-size", default=None, type=int, help="Min file size in bytes")
+@click.option("--max-size", default=None, type=int, help="Max file size in bytes")
 @click.pass_context
-def download(ctx, chat_id, limit, videos, images):
+def download(ctx, chat_id, limit, videos, images, min_size, max_size):
     """Download media from a chat or channel.
 
     CHAT_ID can be a numeric ID or @username.
@@ -104,11 +124,10 @@ def download(ctx, chat_id, limit, videos, images):
         client = app["client"]
 
         try:
-            await client.start(phone=config.phone)
-            console.print(f"[green]Connected to Telegram[/green]")
+            await _start_client(client, config)
+            console.print("[green]Connected to Telegram[/green]")
 
-            # Parse chat_id
-            target = int(chat_id) if chat_id.lstrip("-").isdigit() else chat_id
+            target = _parse_chat_id(chat_id)
 
             # Resolve media
             console.print(f"Scanning [cyan]{chat_id}[/cyan] for media...")
@@ -117,6 +136,8 @@ def download(ctx, chat_id, limit, videos, images):
                 chat_id=target,
                 media_types=media_types,
                 limit=limit,
+                min_file_size=min_size,
+                max_file_size=max_size,
             )
 
             if not items:
@@ -127,20 +148,42 @@ def download(ctx, chat_id, limit, videos, images):
 
             # Enqueue and download
             queue = app["queue"]
-            queue.on_progress(lambda p: console.print(
-                f"  [{p.media_type.value}] {p.file_name or 'unknown'}: "
-                f"{p.progress:.0%} ({p.downloaded_bytes}/{p.total_bytes})",
-                end="\r",
-            ))
 
             task_ids = await queue.enqueue_many(items)
             console.print(f"Enqueued [green]{len(task_ids)}[/green] new items "
                          f"({len(items) - len(task_ids)} duplicates skipped)")
 
             if task_ids:
-                results = await queue.process_queue()
-                completed = sum(1 for r in results if r.status.value == "completed")
-                failed = sum(1 for r in results if r.status.value == "failed")
+                progress = Progress(
+                    TextColumn("[bold]{task.fields[media_type]}"),
+                    TextColumn("{task.description}"),
+                    BarColumn(),
+                    DownloadColumn(),
+                    TransferSpeedColumn(),
+                    console=console,
+                )
+                progress_tasks: dict[str, int] = {}  # task_id -> progress task id
+
+                def _on_progress(p):
+                    if p.task_id not in progress_tasks:
+                        tid = progress.add_task(
+                            p.file_name or "unknown",
+                            total=p.total_bytes or 0,
+                            media_type=p.media_type.value,
+                        )
+                        progress_tasks[p.task_id] = tid
+                    progress.update(
+                        progress_tasks[p.task_id],
+                        completed=p.downloaded_bytes,
+                    )
+
+                queue.on_progress(_on_progress)
+
+                with progress:
+                    results = await queue.process_queue()
+
+                completed = sum(1 for r in results if r.status == DownloadStatus.COMPLETED)
+                failed = sum(1 for r in results if r.status == DownloadStatus.FAILED)
                 console.print(
                     f"\nDone: [green]{completed} completed[/green], "
                     f"[red]{failed} failed[/red]"
@@ -156,8 +199,10 @@ def download(ctx, chat_id, limit, videos, images):
 @click.argument("chat_id")
 @click.option("--videos/--no-videos", default=True, help="Download videos")
 @click.option("--images/--no-images", default=True, help="Download images")
+@click.option("--min-size", default=None, type=int, help="Min file size in bytes")
+@click.option("--max-size", default=None, type=int, help="Max file size in bytes")
 @click.pass_context
-def subscribe(ctx, chat_id, videos, images):
+def subscribe(ctx, chat_id, videos, images, min_size, max_size):
     """Subscribe to a channel or chat for auto-download.
 
     CHAT_ID can be a numeric ID or @username.
@@ -175,11 +220,16 @@ def subscribe(ctx, chat_id, videos, images):
         client = app["client"]
 
         try:
-            await client.start(phone=config.phone)
+            await _start_client(client, config)
             sub_mgr = app["subscription"]
 
-            target = int(chat_id) if chat_id.lstrip("-").isdigit() else chat_id
-            sub = await sub_mgr.add(target, media_types=media_types)
+            target = _parse_chat_id(chat_id)
+            sub = await sub_mgr.add(
+                target,
+                media_types=media_types,
+                min_file_size=min_size,
+                max_file_size=max_size,
+            )
             console.print(
                 f"[green]Subscribed to {sub.chat_title}[/green] "
                 f"(id={sub.chat_id}, types={[mt.value for mt in sub.media_types]})"
@@ -205,10 +255,10 @@ def unsubscribe(ctx, chat_id):
         client = app["client"]
 
         try:
-            await client.start(phone=config.phone)
+            await _start_client(client, config)
             sub_mgr = app["subscription"]
 
-            target = int(chat_id) if chat_id.lstrip("-").isdigit() else chat_id
+            target = _parse_chat_id(chat_id)
             removed = await sub_mgr.remove(target)
             if removed:
                 console.print(f"[green]Unsubscribed from {chat_id}[/green]")
@@ -217,6 +267,88 @@ def unsubscribe(ctx, chat_id):
         finally:
             await app["db"].close()
             await client.disconnect()
+
+    run_async(_run())
+
+
+@cli.command()
+@click.argument("chat_id")
+@click.pass_context
+def pause(ctx, chat_id):
+    """Pause a subscription (stop checking for new media)."""
+    config = ctx.obj["config"]
+
+    async def _run():
+        app = await _get_app(config)
+
+        try:
+            target = _parse_chat_id(chat_id)
+            numeric_id = target if isinstance(target, int) else None
+
+            if numeric_id is None:
+                client = app["client"]
+                await _start_client(client, config)
+                from src.resolver.resolver import MediaResolver
+                resolver = MediaResolver(client)
+                info = await resolver.get_chat_info(target)
+                if not info:
+                    console.print(f"[red]Chat not found: {chat_id}[/red]")
+                    return
+                numeric_id = info["id"]
+
+            sub_mgr = app["subscription"]
+            sub = await sub_mgr.get(numeric_id)
+            if not sub:
+                console.print(f"[yellow]Not subscribed to {chat_id}[/yellow]")
+                return
+
+            await sub_mgr.pause(numeric_id)
+            console.print(f"[yellow]Paused subscription: {sub.chat_title or chat_id}[/yellow]")
+        finally:
+            await app["db"].close()
+            if app.get("client") and app["client"].is_connected():
+                await app["client"].disconnect()
+
+    run_async(_run())
+
+
+@cli.command()
+@click.argument("chat_id")
+@click.pass_context
+def resume(ctx, chat_id):
+    """Resume a paused subscription."""
+    config = ctx.obj["config"]
+
+    async def _run():
+        app = await _get_app(config)
+
+        try:
+            target = _parse_chat_id(chat_id)
+            numeric_id = target if isinstance(target, int) else None
+
+            if numeric_id is None:
+                client = app["client"]
+                await _start_client(client, config)
+                from src.resolver.resolver import MediaResolver
+                resolver = MediaResolver(client)
+                info = await resolver.get_chat_info(target)
+                if not info:
+                    console.print(f"[red]Chat not found: {chat_id}[/red]")
+                    return
+                numeric_id = info["id"]
+
+            sub_mgr = app["subscription"]
+            sub = await sub_mgr.get(numeric_id)
+            if not sub:
+                console.print(f"[yellow]Not subscribed to {chat_id}[/yellow]")
+                return
+
+            await sub_mgr.resume(numeric_id)
+            console.print(f"[green]Resumed subscription: {sub.chat_title or chat_id}[/green]")
+        finally:
+            await app["db"].close()
+            if app.get("client") and app["client"].is_connected():
+                await app["client"].disconnect()
 
     run_async(_run())
 
@@ -276,8 +408,6 @@ def status(ctx):
     config = ctx.obj["config"]
 
     async def _run():
-        from src.core.types import DownloadStatus
-
         app = await _get_app(config)
 
         try:
@@ -287,7 +417,7 @@ def status(ctx):
             failed = await db.get_download_count(status=DownloadStatus.FAILED)
 
             subs = await db.get_all_subscriptions()
-            active_subs = sum(1 for s in subs if s.status.value == "active")
+            active_subs = sum(1 for s in subs if s.status == SubscriptionStatus.ACTIVE)
 
             table = Table(title="Status")
             table.add_column("Metric", style="cyan")
@@ -322,7 +452,7 @@ def run(ctx):
         client = app["client"]
 
         try:
-            await client.start(phone=config.phone)
+            await _start_client(client, config)
             console.print("[green]Connected to Telegram[/green]")
 
             scheduler = app["scheduler"]
@@ -339,7 +469,9 @@ def run(ctx):
             while scheduler.is_running:
                 results = await queue.process_queue()
                 if results:
-                    completed = sum(1 for r in results if r.status.value == "completed")
+                    completed = sum(
+                        1 for r in results if r.status == DownloadStatus.COMPLETED
+                    )
                     console.print(f"Processed {len(results)} items ({completed} completed)")
                 await asyncio.sleep(5)
 
@@ -353,6 +485,108 @@ def run(ctx):
             console.print("[green]Stopped[/green]")
 
     run_async(_run())
+
+
+@cli.command()
+@click.option("--chat-id", default=None, help="Filter by chat ID")
+@click.option("--type", "media_type", default=None, type=click.Choice(["video", "image"]),
+              help="Filter by media type")
+@click.option("--limit", "-l", default=20, type=int, help="Number of records to show")
+@click.option("--export", "export_fmt", default=None, type=click.Choice(["csv", "json"]),
+              help="Export format (csv or json)")
+@click.option("--output", "-o", default=None, type=click.Path(), help="Export file path")
+@click.pass_context
+def history(ctx, chat_id, media_type, limit, export_fmt, output):
+    """View download history with optional export."""
+    config = ctx.obj["config"]
+
+    async def _run():
+        app = await _get_app(config)
+
+        try:
+            db = app["db"]
+            filter_chat = int(chat_id) if chat_id and chat_id.lstrip("-").isdigit() else None
+            filter_type = MediaType(media_type) if media_type else None
+
+            downloads = await db.get_downloads(
+                chat_id=filter_chat,
+                media_type=filter_type,
+                limit=limit,
+            )
+
+            if not downloads:
+                console.print("[yellow]No download history[/yellow]")
+                return
+
+            # Export mode
+            if export_fmt:
+                _export_downloads(downloads, export_fmt, output)
+                return
+
+            # Table display
+            table = Table(title=f"Download History (showing {len(downloads)})")
+            table.add_column("Date", style="dim")
+            table.add_column("Chat ID", style="cyan")
+            table.add_column("Sender")
+            table.add_column("Type")
+            table.add_column("File")
+            table.add_column("Size")
+            table.add_column("Status")
+
+            for dl in downloads:
+                date_str = dl["created_at"][:19] if dl.get("created_at") else "-"
+                size = dl.get("file_size", 0) or 0
+                size_str = _format_size(size)
+
+                status_val = dl.get("status", "unknown")
+                status_style = {"completed": "green", "failed": "red"}.get(status_val, "white")
+
+                table.add_row(
+                    date_str,
+                    str(dl.get("chat_id", "-")),
+                    dl.get("sender_name") or str(dl.get("sender_id") or "-"),
+                    dl.get("media_type", "-"),
+                    dl.get("file_name") or "-",
+                    size_str,
+                    f"[{status_style}]{status_val}[/{status_style}]",
+                )
+
+            console.print(table)
+        finally:
+            await app["db"].close()
+
+    run_async(_run())
+
+
+def _format_size(size_bytes: int) -> str:
+    """Format file size to human readable string."""
+    if size_bytes == 0:
+        return "-"
+    for unit in ["B", "KB", "MB", "GB"]:
+        if size_bytes < 1024:
+            return f"{size_bytes:.1f} {unit}"
+        size_bytes /= 1024
+    return f"{size_bytes:.1f} TB"
+
+
+def _export_downloads(downloads: list[dict], fmt: str, output_path: str | None) -> None:
+    """Export download records to CSV or JSON."""
+    if fmt == "json":
+        content = json.dumps(downloads, indent=2, ensure_ascii=False, default=str)
+    else:
+        buf = io.StringIO()
+        if downloads:
+            writer = csv.DictWriter(buf, fieldnames=downloads[0].keys())
+            writer.writeheader()
+            writer.writerows(downloads)
+        content = buf.getvalue()
+
+    if output_path:
+        with open(output_path, "w", encoding="utf-8") as f:
+            f.write(content)
+        console.print(f"[green]Exported {len(downloads)} records to {output_path}[/green]")
+    else:
+        console.print(content)
 
 
 @cli.command()

@@ -1,6 +1,6 @@
 # Telegram Downloader 使用指南
 
-> 版本：0.1.0 | 最後更新：2026-04-10
+> 版本：0.2.0 | 最後更新：2026-04-10
 
 ## 目錄
 
@@ -89,6 +89,10 @@ telegram-dl download @channel_name --no-images
 
 # 只下載圖片
 telegram-dl download @channel_name --no-videos
+
+# 過濾檔案大小（單位：bytes）
+telegram-dl download @channel_name --min-size 1048576  # 最小 1MB
+telegram-dl download @channel_name --max-size 104857600  # 最大 100MB
 ```
 
 ### 訂閱頻道 (`subscribe`)
@@ -101,12 +105,32 @@ telegram-dl subscribe @channel_name
 
 # 只訂閱影片
 telegram-dl subscribe @channel_name --no-images
+
+# 設定檔案大小過濾
+telegram-dl subscribe @channel_name --min-size 1048576
 ```
 
 ### 取消訂閱 (`unsubscribe`)
 
 ```bash
 telegram-dl unsubscribe @channel_name
+```
+
+### 暫停訂閱 (`pause`)
+
+暫時停止檢查某個訂閱的新內容。
+
+```bash
+telegram-dl pause @channel_name
+telegram-dl pause -1001234567890
+```
+
+### 恢復訂閱 (`resume`)
+
+恢復已暫停的訂閱。
+
+```bash
+telegram-dl resume @channel_name
 ```
 
 ### 查看訂閱清單 (`list`)
@@ -131,6 +155,30 @@ telegram-dl run
 
 ```bash
 telegram-dl status
+```
+
+### 查看下載歷史 (`history`)
+
+查看已下載的檔案記錄，支援過濾和匯出。
+
+```bash
+# 查看最近 20 筆記錄
+telegram-dl history
+
+# 過濾特定頻道
+telegram-dl history --chat-id -1001234567890
+
+# 只看影片
+telegram-dl history --type video
+
+# 顯示更多記錄
+telegram-dl history --limit 50
+
+# 匯出為 JSON
+telegram-dl history --export json --output downloads.json
+
+# 匯出為 CSV
+telegram-dl history --export csv --output downloads.csv
 ```
 
 ### 查看設定 (`config`)

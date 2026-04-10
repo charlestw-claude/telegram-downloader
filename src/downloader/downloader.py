@@ -140,11 +140,12 @@ class MediaDownloader:
             )
 
             # Build Telethon progress callback
-            telethon_progress = None
-            if progress_callback:
+            def _make_progress_cb(cb: ProgressCallback):
+                def _on_progress(received: int, total: int) -> None:
+                    cb(received, total)
+                return _on_progress
 
-                def telethon_progress(received: int, total: int) -> None:
-                    progress_callback(received, total)
+            telethon_progress = _make_progress_cb(progress_callback) if progress_callback else None
 
             # Download using Telethon
             message = await self.client.get_messages(media.chat_id, ids=media.message_id)
