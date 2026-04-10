@@ -151,6 +151,7 @@ class MediaResolver:
         limit: int | None = None,
         min_file_size: int | None = None,
         max_file_size: int | None = None,
+        timeout: float | None = 300.0,
     ) -> list[MediaItem]:
         """Scan a chat/channel for media items.
 
@@ -161,39 +162,53 @@ class MediaResolver:
             limit: Maximum number of messages to scan. None = no limit.
             min_file_size: Minimum file size in bytes.
             max_file_size: Maximum file size in bytes.
+            timeout: Scan timeout in seconds. None = no timeout.
 
         Returns:
             List of MediaItem objects found.
         """
+        import asyncio
+
         allowed_types = set(media_types) if media_types else None
         items: list[MediaItem] = []
         scanned = 0
 
         logger.info("Scanning chat %d for media (min_id=%s, limit=%s)", chat_id, min_id, limit)
 
-        async for message in self.client.iter_messages(
-            chat_id,
-            min_id=min_id or 0,
-            limit=limit,
-        ):
-            scanned += 1
-            if scanned % 500 == 0:
-                logger.debug("Scanned %d messages...", scanned)
+        async def _scan():
+            nonlocal scanned
+            async for message in self.client.iter_messages(
+                chat_id,
+                min_id=min_id or 0,
+                limit=limit,
+            ):
+                scanned += 1
+                if scanned % 500 == 0:
+                    logger.debug("Scanned %d messages...", scanned)
 
-            message_items = self._message_to_media_items(message)
+                message_items = self._message_to_media_items(message)
 
-            for item in message_items:
-                # Filter by media type
-                if allowed_types and item.media_type not in allowed_types:
-                    continue
+                for item in message_items:
+                    if allowed_types and item.media_type not in allowed_types:
+                        continue
+                    if min_file_size and item.file_size and item.file_size < min_file_size:
+                        continue
+                    if max_file_size and item.file_size and item.file_size > max_file_size:
+                        continue
+                    items.append(item)
 
-                # Filter by file size
-                if min_file_size and item.file_size and item.file_size < min_file_size:
-                    continue
-                if max_file_size and item.file_size and item.file_size > max_file_size:
-                    continue
-
-                items.append(item)
+        try:
+            if timeout:
+                await asyncio.wait_for(_scan(), timeout=timeout)
+            else:
+                await _scan()
+        except asyncio.TimeoutError:
+            logger.warning(
+                "Scan timed out after %.0fs (scanned %d messages, found %d items)",
+                timeout,
+                scanned,
+                len(items),
+            )
 
         logger.info(
             "Found %d media items in %d messages from chat %d",

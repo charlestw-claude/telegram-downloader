@@ -31,15 +31,19 @@ class DownloadScheduler:
         db: DatabaseManager,
         queue: DownloadQueue,
         check_interval: int = 300,
+        error_retry_interval: int = 3,
     ) -> None:
         self.client = client
         self.db = db
         self.queue = queue
         self.check_interval = check_interval
+        self.error_retry_interval = error_retry_interval
 
         self._resolver = MediaResolver(client)
         self._running = False
         self._task: asyncio.Task | None = None
+        self._error_counts: dict[int, int] = {}  # chat_id -> consecutive error count
+        self._check_cycle: int = 0
 
     async def start(self) -> None:
         """Start the scheduler background loop."""
@@ -66,9 +70,28 @@ class DownloadScheduler:
     async def check_now(self) -> int:
         """Run an immediate check on all active subscriptions.
 
+        Also retries errored subscriptions periodically.
         Returns total number of new media items enqueued.
         """
+        self._check_cycle += 1
+
         subs = await self.db.get_active_subscriptions()
+
+        # Periodically retry errored subscriptions
+        if self._check_cycle % self.error_retry_interval == 0:
+            errored = await self.db.get_all_subscriptions()
+            for sub in errored:
+                if sub.status == SubscriptionStatus.ERROR:
+                    logger.info(
+                        "Auto-retrying errored subscription: %s (chat_id=%d)",
+                        sub.chat_title,
+                        sub.chat_id,
+                    )
+                    await self.db.update_subscription_status(
+                        sub.chat_id, SubscriptionStatus.ACTIVE
+                    )
+                    subs.append(sub)
+
         if not subs:
             logger.info("No active subscriptions to check")
             return 0
