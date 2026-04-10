@@ -276,7 +276,7 @@ class DatabaseManager:
 
     async def enqueue_task(self, media: MediaItem) -> str:
         """Add a media item to the download queue. Returns task ID."""
-        task_id = str(uuid.uuid4())[:8]
+        task_id = str(uuid.uuid4())
         await self.db.execute(
             """INSERT OR IGNORE INTO queue_tasks
             (id, message_id, chat_id, media_type, file_id, file_size, file_name,

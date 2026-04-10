@@ -48,7 +48,7 @@ class DownloadQueue:
         self.retry_delay = retry_delay
 
         self._semaphore = asyncio.Semaphore(max_concurrent)
-        self._active_tasks: dict[str, asyncio.Task] = {}
+        self._active_count = 0
         self._on_progress: OnProgressCallback | None = None
         self._on_complete: OnCompleteCallback | None = None
         self._running = False
@@ -130,9 +130,18 @@ class DownloadQueue:
     async def _process_single(self, task_id: str, media: MediaItem) -> DownloadResult:
         """Process a single download task with semaphore and retry."""
         async with self._semaphore:
-            await self.db.update_task_status(task_id, DownloadStatus.DOWNLOADING)
+            self._active_count += 1
+            try:
+                return await self._download_with_retry(task_id, media)
+            finally:
+                self._active_count -= 1
 
-            for attempt in range(self.max_retries + 1):
+    async def _download_with_retry(self, task_id: str, media: MediaItem) -> DownloadResult:
+        """Execute download with retry logic."""
+        await self.db.update_task_status(task_id, DownloadStatus.DOWNLOADING)
+        result: DownloadResult | None = None
+
+        for attempt in range(self.max_retries + 1):
                 # Progress callback wrapper
                 def make_progress_cb(tid: str, m: MediaItem):
                     def cb(downloaded: int, total: int) -> None:
@@ -185,8 +194,9 @@ class DownloadQueue:
                         self._on_complete(result)
                     return result
 
-            # Should not reach here, but just in case
-            return result  # type: ignore[possibly-undefined]
+        # Should not reach here, but just in case
+        assert result is not None
+        return result
 
     def stop(self) -> None:
         """Signal the queue to stop processing after current batch."""
@@ -196,7 +206,7 @@ class DownloadQueue:
     @property
     def active_count(self) -> int:
         """Number of currently active downloads."""
-        return self.max_concurrent - self._semaphore._value
+        return self._active_count
 
     @staticmethod
     def _row_to_media(row: dict) -> MediaItem:
