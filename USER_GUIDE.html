@@ -66,7 +66,7 @@
 <body>
 
 <h1>Telegram Downloader 使用指南</h1>
-<p class="version-info">版本：0.1.0 | 最後更新：2026-04-10</p>
+<p class="version-info">版本：0.2.0 | 最後更新：2026-04-10</p>
 
 <nav class="toc">
     <strong>目錄</strong>
@@ -132,17 +132,33 @@ telegram-dl download @channel_name --limit 100
 telegram-dl download @channel_name --no-images
 
 # 只下載圖片
-telegram-dl download @channel_name --no-videos</code></pre>
+telegram-dl download @channel_name --no-videos
+
+# 過濾檔案大小（單位：bytes）
+telegram-dl download @channel_name --min-size 1048576
+telegram-dl download @channel_name --max-size 104857600</code></pre>
 
 <h3>訂閱頻道 (<code>subscribe</code>)</h3>
 <pre><code># 訂閱頻道
 telegram-dl subscribe @channel_name
 
 # 只訂閱影片
-telegram-dl subscribe @channel_name --no-images</code></pre>
+telegram-dl subscribe @channel_name --no-images
+
+# 設定檔案大小過濾
+telegram-dl subscribe @channel_name --min-size 1048576</code></pre>
 
 <h3>取消訂閱 (<code>unsubscribe</code>)</h3>
 <pre><code>telegram-dl unsubscribe @channel_name</code></pre>
+
+<h3>暫停訂閱 (<code>pause</code>)</h3>
+<p>暫時停止檢查某個訂閱的新內容。</p>
+<pre><code>telegram-dl pause @channel_name
+telegram-dl pause -1001234567890</code></pre>
+
+<h3>恢復訂閱 (<code>resume</code>)</h3>
+<p>恢復已暫停的訂閱。</p>
+<pre><code>telegram-dl resume @channel_name</code></pre>
 
 <h3>查看訂閱清單 (<code>list</code>)</h3>
 <pre><code>telegram-dl list</code></pre>
@@ -154,6 +170,23 @@ telegram-dl subscribe @channel_name --no-images</code></pre>
 
 <h3>查看狀態 (<code>status</code>)</h3>
 <pre><code>telegram-dl status</code></pre>
+
+<h3>查看下載歷史 (<code>history</code>)</h3>
+<p>查看已下載的檔案記錄，支援過濾和匯出。</p>
+<pre><code># 查看最近 20 筆記錄
+telegram-dl history
+
+# 過濾特定頻道
+telegram-dl history --chat-id -1001234567890
+
+# 只看影片
+telegram-dl history --type video
+
+# 匯出為 JSON
+telegram-dl history --export json --output downloads.json
+
+# 匯出為 CSV
+telegram-dl history --export csv --output downloads.csv</code></pre>
 
 <h3>查看設定 (<code>config</code>)</h3>
 <pre><code>telegram-dl config</code></pre>
