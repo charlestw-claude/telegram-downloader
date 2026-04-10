@@ -5,8 +5,13 @@ from __future__ import annotations
 import asyncio
 import sys
 
+import csv
+import io
+import json
+
 import click
 from rich.console import Console
+from rich.progress import BarColumn, DownloadColumn, Progress, TextColumn, TransferSpeedColumn
 from rich.table import Table
 
 from src.core.config import Config
@@ -143,18 +148,40 @@ def download(ctx, chat_id, limit, videos, images, min_size, max_size):
 
             # Enqueue and download
             queue = app["queue"]
-            queue.on_progress(lambda p: console.print(
-                f"  [{p.media_type.value}] {p.file_name or 'unknown'}: "
-                f"{p.progress:.0%} ({p.downloaded_bytes}/{p.total_bytes})",
-                end="\r",
-            ))
 
             task_ids = await queue.enqueue_many(items)
             console.print(f"Enqueued [green]{len(task_ids)}[/green] new items "
                          f"({len(items) - len(task_ids)} duplicates skipped)")
 
             if task_ids:
-                results = await queue.process_queue()
+                progress = Progress(
+                    TextColumn("[bold]{task.fields[media_type]}"),
+                    TextColumn("{task.description}"),
+                    BarColumn(),
+                    DownloadColumn(),
+                    TransferSpeedColumn(),
+                    console=console,
+                )
+                progress_tasks: dict[str, int] = {}  # task_id -> progress task id
+
+                def _on_progress(p):
+                    if p.task_id not in progress_tasks:
+                        tid = progress.add_task(
+                            p.file_name or "unknown",
+                            total=p.total_bytes or 0,
+                            media_type=p.media_type.value,
+                        )
+                        progress_tasks[p.task_id] = tid
+                    progress.update(
+                        progress_tasks[p.task_id],
+                        completed=p.downloaded_bytes,
+                    )
+
+                queue.on_progress(_on_progress)
+
+                with progress:
+                    results = await queue.process_queue()
+
                 completed = sum(1 for r in results if r.status == DownloadStatus.COMPLETED)
                 failed = sum(1 for r in results if r.status == DownloadStatus.FAILED)
                 console.print(
@@ -458,6 +485,108 @@ def run(ctx):
             console.print("[green]Stopped[/green]")
 
     run_async(_run())
+
+
+@cli.command()
+@click.option("--chat-id", default=None, help="Filter by chat ID")
+@click.option("--type", "media_type", default=None, type=click.Choice(["video", "image"]),
+              help="Filter by media type")
+@click.option("--limit", "-l", default=20, type=int, help="Number of records to show")
+@click.option("--export", "export_fmt", default=None, type=click.Choice(["csv", "json"]),
+              help="Export format (csv or json)")
+@click.option("--output", "-o", default=None, type=click.Path(), help="Export file path")
+@click.pass_context
+def history(ctx, chat_id, media_type, limit, export_fmt, output):
+    """View download history with optional export."""
+    config = ctx.obj["config"]
+
+    async def _run():
+        app = await _get_app(config)
+
+        try:
+            db = app["db"]
+            filter_chat = int(chat_id) if chat_id and chat_id.lstrip("-").isdigit() else None
+            filter_type = MediaType(media_type) if media_type else None
+
+            downloads = await db.get_downloads(
+                chat_id=filter_chat,
+                media_type=filter_type,
+                limit=limit,
+            )
+
+            if not downloads:
+                console.print("[yellow]No download history[/yellow]")
+                return
+
+            # Export mode
+            if export_fmt:
+                _export_downloads(downloads, export_fmt, output)
+                return
+
+            # Table display
+            table = Table(title=f"Download History (showing {len(downloads)})")
+            table.add_column("Date", style="dim")
+            table.add_column("Chat ID", style="cyan")
+            table.add_column("Sender")
+            table.add_column("Type")
+            table.add_column("File")
+            table.add_column("Size")
+            table.add_column("Status")
+
+            for dl in downloads:
+                date_str = dl["created_at"][:19] if dl.get("created_at") else "-"
+                size = dl.get("file_size", 0) or 0
+                size_str = _format_size(size)
+
+                status_val = dl.get("status", "unknown")
+                status_style = {"completed": "green", "failed": "red"}.get(status_val, "white")
+
+                table.add_row(
+                    date_str,
+                    str(dl.get("chat_id", "-")),
+                    dl.get("sender_name") or str(dl.get("sender_id") or "-"),
+                    dl.get("media_type", "-"),
+                    dl.get("file_name") or "-",
+                    size_str,
+                    f"[{status_style}]{status_val}[/{status_style}]",
+                )
+
+            console.print(table)
+        finally:
+            await app["db"].close()
+
+    run_async(_run())
+
+
+def _format_size(size_bytes: int) -> str:
+    """Format file size to human readable string."""
+    if size_bytes == 0:
+        return "-"
+    for unit in ["B", "KB", "MB", "GB"]:
+        if size_bytes < 1024:
+            return f"{size_bytes:.1f} {unit}"
+        size_bytes /= 1024
+    return f"{size_bytes:.1f} TB"
+
+
+def _export_downloads(downloads: list[dict], fmt: str, output_path: str | None) -> None:
+    """Export download records to CSV or JSON."""
+    if fmt == "json":
+        content = json.dumps(downloads, indent=2, ensure_ascii=False, default=str)
+    else:
+        buf = io.StringIO()
+        if downloads:
+            writer = csv.DictWriter(buf, fieldnames=downloads[0].keys())
+            writer.writeheader()
+            writer.writerows(downloads)
+        content = buf.getvalue()
+
+    if output_path:
+        with open(output_path, "w", encoding="utf-8") as f:
+            f.write(content)
+        console.print(f"[green]Exported {len(downloads)} records to {output_path}[/green]")
+    else:
+        console.print(content)
 
 
 @cli.command()
