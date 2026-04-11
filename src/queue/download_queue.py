@@ -142,61 +142,62 @@ class DownloadQueue:
         result: DownloadResult | None = None
 
         for attempt in range(self.max_retries + 1):
-                # Progress callback wrapper
-                def make_progress_cb(tid: str, m: MediaItem):
-                    def cb(downloaded: int, total: int) -> None:
-                        if self._on_progress:
-                            progress = downloaded / total if total > 0 else 0
-                            self._on_progress(
-                                DownloadProgress(
-                                    task_id=tid,
-                                    file_name=m.file_name or "",
-                                    media_type=m.media_type,
-                                    status=DownloadStatus.DOWNLOADING,
-                                    progress=progress,
-                                    downloaded_bytes=downloaded,
-                                    total_bytes=total,
-                                )
+            # Progress callback wrapper
+            def make_progress_cb(tid: str, m: MediaItem):
+                def cb(downloaded: int, total: int) -> None:
+                    if self._on_progress:
+                        progress = downloaded / total if total > 0 else 0
+                        self._on_progress(
+                            DownloadProgress(
+                                task_id=tid,
+                                file_name=m.file_name or "",
+                                media_type=m.media_type,
+                                status=DownloadStatus.DOWNLOADING,
+                                progress=progress,
+                                downloaded_bytes=downloaded,
+                                total_bytes=total,
                             )
-                    return cb
+                        )
+                return cb
 
-                result = await self.downloader.download(
-                    media, progress_callback=make_progress_cb(task_id, media)
+            result = await self.downloader.download(
+                media, progress_callback=make_progress_cb(task_id, media)
+            )
+
+            if result.status == DownloadStatus.COMPLETED:
+                await self.db.update_task_status(task_id, DownloadStatus.COMPLETED)
+                await self.db.save_download(result)
+                if self._on_complete:
+                    self._on_complete(result)
+                return result
+
+            if result.status == DownloadStatus.SKIPPED:
+                await self.db.update_task_status(task_id, DownloadStatus.SKIPPED)
+                await self.db.save_download(result)
+                return result
+
+            # Failed - retry if attempts remain
+            if attempt < self.max_retries:
+                await self.db.increment_retry(task_id)
+                logger.warning(
+                    "Retry %d/%d for task %s: %s",
+                    attempt + 1,
+                    self.max_retries,
+                    task_id,
+                    result.error,
                 )
+                await asyncio.sleep(self.retry_delay * (attempt + 1))
+            else:
+                await self.db.update_task_status(
+                    task_id, DownloadStatus.FAILED, result.error
+                )
+                if self._on_complete:
+                    self._on_complete(result)
+                return result
 
-                if result.status == DownloadStatus.COMPLETED:
-                    await self.db.update_task_status(task_id, DownloadStatus.COMPLETED)
-                    await self.db.save_download(result)
-                    if self._on_complete:
-                        self._on_complete(result)
-                    return result
-
-                if result.status == DownloadStatus.SKIPPED:
-                    await self.db.update_task_status(task_id, DownloadStatus.SKIPPED)
-                    await self.db.save_download(result)
-                    return result
-
-                # Failed - retry if attempts remain
-                if attempt < self.max_retries:
-                    await self.db.increment_retry(task_id)
-                    logger.warning(
-                        "Retry %d/%d for task %s: %s",
-                        attempt + 1,
-                        self.max_retries,
-                        task_id,
-                        result.error,
-                    )
-                    await asyncio.sleep(self.retry_delay * (attempt + 1))
-                else:
-                    await self.db.update_task_status(
-                        task_id, DownloadStatus.FAILED, result.error
-                    )
-                    if self._on_complete:
-                        self._on_complete(result)
-                    return result
-
-        # Should not reach here, but just in case
-        assert result is not None
+        # All retries exhausted without returning - should not happen
+        if result is None:
+            raise RuntimeError(f"Download result is None after all retry attempts for task {task_id}")
         return result
 
     def stop(self) -> None:

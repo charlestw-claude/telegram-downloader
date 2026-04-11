@@ -66,6 +66,9 @@ class SubscriptionManager:
                 f"Already subscribed to {chat_info['title']} (id={numeric_id})"
             )
 
+        if min_file_size and max_file_size and min_file_size > max_file_size:
+            raise ValueError("min_file_size must be <= max_file_size")
+
         if media_types is None:
             media_types = [MediaType.VIDEO, MediaType.IMAGE]
 

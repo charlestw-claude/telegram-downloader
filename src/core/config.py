@@ -73,6 +73,10 @@ class Config:
             errors.append("TELEGRAM_API_ID is required")
         if not self.api_hash:
             errors.append("TELEGRAM_API_HASH is required")
+        if self.max_concurrent_downloads < 1:
+            errors.append("MAX_CONCURRENT_DOWNLOADS must be at least 1")
+        if self.check_interval <= 0:
+            errors.append("CHECK_INTERVAL must be positive")
         return errors
 
     def ensure_directories(self) -> None:

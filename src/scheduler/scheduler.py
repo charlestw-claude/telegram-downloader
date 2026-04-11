@@ -41,6 +41,7 @@ class DownloadScheduler:
 
         self._resolver = MediaResolver(client)
         self._running = False
+        self._stop_event = asyncio.Event()
         self._task: asyncio.Task | None = None
         self._error_counts: dict[int, int] = {}  # chat_id -> consecutive error count
         self._check_cycle: int = 0
@@ -52,12 +53,14 @@ class DownloadScheduler:
             return
 
         self._running = True
+        self._stop_event.clear()
         self._task = asyncio.create_task(self._run_loop())
         logger.info("Scheduler started (interval=%ds)", self.check_interval)
 
     async def stop(self) -> None:
         """Stop the scheduler."""
         self._running = False
+        self._stop_event.set()
         if self._task:
             self._task.cancel()
             try:
@@ -112,9 +115,14 @@ class DownloadScheduler:
             except Exception as e:
                 logger.error("Scheduler check failed: %s", e)
 
-            # Wait for next interval
+            # Wait for next interval or stop signal
             try:
-                await asyncio.sleep(self.check_interval)
+                await asyncio.wait_for(
+                    self._stop_event.wait(), timeout=self.check_interval
+                )
+                break  # Stop event was set
+            except asyncio.TimeoutError:
+                continue  # Timeout = time to check again
             except asyncio.CancelledError:
                 break
 
