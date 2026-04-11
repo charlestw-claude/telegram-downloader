@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.2.1] - 2026-04-12
+### Fixed
+- Fix CLI hanging on `client.start()` when session already authorized
+- Include 'skipped' status in download deduplication check
+- Save skipped downloads to database for accurate history tracking
+- Fix `%d` format specifier error when chat_id is a string (e.g., username)
+- Fix indentation error in download queue retry loop
+- Replace unsafe `assert` with explicit error handling in production code
+- Add file size validation (min <= max) in subscription manager
+- Add config validation for max_concurrent_downloads and check_interval
+- Use `asyncio.Event` for cleaner scheduler stop signaling
+
 ## [0.2.0] - 2026-04-10
 ### Added
 - CLI `pause` command to pause subscription monitoring

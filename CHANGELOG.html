@@ -25,6 +25,20 @@
 <body>
     <h1>Changelog</h1>
 
+    <h2 id="0.2.1"><a href="#0.2.1">[0.2.1]</a> - 2026-04-12</h2>
+    <h3>Fixed</h3>
+    <ul>
+        <li>Fix CLI hanging on <code>client.start()</code> when session already authorized</li>
+        <li>Include 'skipped' status in download deduplication check</li>
+        <li>Save skipped downloads to database for accurate history tracking</li>
+        <li>Fix <code>%d</code> format specifier error when chat_id is a string (e.g., username)</li>
+        <li>Fix indentation error in download queue retry loop</li>
+        <li>Replace unsafe <code>assert</code> with explicit error handling in production code</li>
+        <li>Add file size validation (min &lt;= max) in subscription manager</li>
+        <li>Add config validation for max_concurrent_downloads and check_interval</li>
+        <li>Use <code>asyncio.Event</code> for cleaner scheduler stop signaling</li>
+    </ul>
+
     <h2 id="0.2.0"><a href="#0.2.0">[0.2.0]</a> - 2026-04-10</h2>
     <h3>Added</h3>
     <ul>
