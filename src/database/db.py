@@ -141,7 +141,7 @@ class DatabaseManager:
         """Check if a media item has already been downloaded."""
         cursor = await self.db.execute(
             """SELECT 1 FROM downloads
-            WHERE chat_id = ? AND message_id = ? AND media_type = ? AND status = 'completed'""",
+            WHERE chat_id = ? AND message_id = ? AND media_type = ? AND status IN ('completed', 'skipped')""",
             (chat_id, message_id, media_type.value),
         )
         return await cursor.fetchone() is not None

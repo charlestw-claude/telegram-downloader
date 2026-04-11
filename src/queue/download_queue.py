@@ -173,6 +173,7 @@ class DownloadQueue:
 
                 if result.status == DownloadStatus.SKIPPED:
                     await self.db.update_task_status(task_id, DownloadStatus.SKIPPED)
+                    await self.db.save_download(result)
                     return result
 
                 # Failed - retry if attempts remain

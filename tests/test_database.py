@@ -89,6 +89,20 @@ async def test_is_downloaded(db, sample_media):
 
 
 @pytest.mark.asyncio
+async def test_is_downloaded_skipped(db, sample_media):
+    """Skipped downloads should also count as downloaded."""
+    result = DownloadResult(
+        task_id="t1",
+        media=sample_media,
+        status=DownloadStatus.SKIPPED,
+        file_size=1024,
+    )
+    await db.save_download(result)
+
+    assert await db.is_downloaded(100, 42, MediaType.VIDEO)
+
+
+@pytest.mark.asyncio
 async def test_download_count(db, sample_media):
     assert await db.get_download_count() == 0
 

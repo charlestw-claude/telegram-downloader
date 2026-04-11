@@ -173,7 +173,7 @@ class MediaResolver:
         items: list[MediaItem] = []
         scanned = 0
 
-        logger.info("Scanning chat %d for media (min_id=%s, limit=%s)", chat_id, min_id, limit)
+        logger.info("Scanning chat %s for media (min_id=%s, limit=%s)", chat_id, min_id, limit)
 
         async def _scan():
             nonlocal scanned
@@ -211,7 +211,7 @@ class MediaResolver:
             )
 
         logger.info(
-            "Found %d media items in %d messages from chat %d",
+            "Found %d media items in %d messages from chat %s",
             len(items),
             scanned,
             chat_id,

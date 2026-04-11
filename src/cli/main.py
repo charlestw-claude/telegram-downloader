@@ -66,7 +66,13 @@ async def _get_app(config: Config):
 
 
 async def _start_client(client, config: Config) -> None:
-    """Start the Telegram client with phone callback fallback."""
+    """Start the Telegram client, skipping interactive login if already authorized."""
+    await client.connect()
+
+    if await client.is_user_authorized():
+        return
+
+    # Not authorized - need interactive login
     if config.phone:
         await client.start(phone=config.phone)
     else:
