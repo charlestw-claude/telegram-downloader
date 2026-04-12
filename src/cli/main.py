@@ -596,6 +596,14 @@ def _export_downloads(downloads: list[dict], fmt: str, output_path: str | None) 
 
 
 @cli.command()
+@click.option("--env", default=None, help="Path to .env file")
+def gui(env):
+    """Launch the desktop GUI."""
+    from src.gui.app import main as gui_main
+    gui_main(env_path=env)
+
+
+@cli.command()
 def config():
     """Show current configuration."""
     cfg = Config.from_env()
